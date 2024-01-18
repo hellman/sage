@@ -85,6 +85,10 @@ from copy import copy, deepcopy
 
 from sage.structure.sequence import Sequence
 
+from sage.arith.misc import divisors, factor
+from sage.functions.other import floor
+from sage.misc.misc_c import prod
+
 from sage.schemes.elliptic_curves.hom import EllipticCurveHom
 
 from sage.rings.polynomial.polynomial_ring_constructor import PolynomialRing
@@ -3912,3 +3916,92 @@ def unfill_isogeny_matrix(M):
                 M1[i,j] = zero
                 M1[j,i] = zero
     return M1
+
+
+def _int_as_balanced_product(n, bound=None, algorithm=None):
+    """
+    Return a (somewhat) balanced factorization of the input integer into two factors.
+
+    INPUT:
+
+    - ``n`` -- a positive integer to factorize
+
+    - ``bound`` (integer, default: None) -- (optional) inclusive upper bound for the smallest factor
+
+    - ``algorithm`` (string, default: None) -- (optional) string:
+
+      - ``'divisors'`` -- exact algorithm based on enumeration of all divisors of ``n``
+
+      - ``'greedy'`` -- approximate algorithm based on greedy multiplication
+        of the smallest factor by largest available prime factors of ``n``
+
+    OUTPUT:
+
+    A pair of integers whose product is equal to ``n``, in increasing order,
+    the smallest integer being below or equal the ``bound`` if it was given.
+
+    EXAMPLES::
+        sage: from sage.schemes.elliptic_curves.ell_curve_isogeny import _int_as_balanced_product
+        sage: _int_as_balanced_product(1000)
+        (25, 40)
+        sage: _int_as_balanced_product(8 * 27 * 25, algorithm="divisors")
+        (72, 75)
+        sage: _int_as_balanced_product(8 * 27 * 25, algorithm="greedy")
+        (50, 108)
+        sage: _int_as_balanced_product(10**20)
+        (6103515625, 16384000000)
+        sage: _int_as_balanced_product(10**20, algorithm="divisors")
+        (10000000000, 10000000000)
+
+    TESTS::
+
+        sage: _int_as_balanced_product(1)
+        (1, 1)
+        sage: _int_as_balanced_product(2)
+        (1, 2)
+        sage: _int_as_balanced_product(3)
+        (1, 3)
+        sage: _int_as_balanced_product(6)
+        (2, 3)
+        sage: _int_as_balanced_product(-6)
+        Traceback (most recent call last):
+        ...
+        ValueError: the input ``n`` must be a positive integer
+    """
+    n = Integer(n)
+    if n < 1:
+        raise ValueError("the input ``n`` must be a positive integer")
+
+    factorization = factor(n)
+    if algorithm is None:
+        if prod(e for p, e in factorization) < 100:
+            algorithm = "divisors"
+        else:
+            algorithm = "greedy"
+
+    if bound is None or bound**2 >= n:
+        bound = floor(n**0.5)
+
+    if algorithm == "divisors":
+        assert n >= 1
+        best_a = 1
+        for a in divisors(n):
+            if a > bound:
+                break
+            if a > best_a:
+                best_a = a
+        b = n // best_a
+        assert best_a * b == n
+        return best_a, b
+
+    elif algorithm == "greedy":
+        a, b = 1, 1
+        for p, e in reversed(factorization):
+            for _ in range(e):
+                ap = a * p
+                if ap <= bound:
+                    a = ap
+                else:
+                    b *= p
+        assert a * b == n
+        return min(a, b), max(a, b)
