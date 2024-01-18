@@ -4078,3 +4078,72 @@ def _compute_isogenous_j_invariants_tree(j, degree):
                     tree[(j1,deg1)] = (j0,deg0)
             front = new_front
     return tree
+
+
+def _filter_isogenous_j_invariants_with_paths(j, degree, condition, filter_all=True):
+    """
+    Filter all j-invariants reachable by an isogeny of the given degree,
+    enumerating them on the fly (memoryless).
+
+    INPUT:
+
+    - ``j``: root j-invariant
+
+    - ``degree``: positive integer - the degree of the isogeny
+
+    - ``condition``: function taking as input a j-invariant and degree of isogeny to it as two arguments,
+      and returns true if path to this j-invariant should be yielded
+
+    - ``filter_all``: (optional) flag telling whether to allow yielding isogenies of lower degree dividing ``degree``
+
+    OUTPUT:
+
+    Yields j-invariant paths in the form of list of tuples of two elements:
+
+    - a j-invariant
+
+    - an isogeny degree from the previous j-invariant (1 for the first j-invariant, namely ``j``)
+
+    EXAMPLES::
+
+        sage: from sage.schemes.elliptic_curves.ell_curve_isogeny import _filter_isogenous_j_invariants_with_paths
+
+    """
+    mod_polys = {}
+    prime_steps = [None]
+    degree_steps = [1]
+    for p, e in factor(degree):
+        mod_polys[p] = classical_modular_polynomial(p).change_ring(j.parent())
+        prime_steps.extend([p]*e)
+        for _ in range(e):
+            degree_steps.append(degree_steps[-1] * p)
+
+    # path = ((None, j0), j1, ...
+    stack = [((None, j), 1)]
+    while stack:
+        path, prime_index = stack.pop()
+        j0 = path[-1]
+        p = prime_steps[prime_index]
+
+        mod_poly = mod_polys[p]
+        x, y = mod_poly.parent().gens()
+        poly = mod_poly.subs({y: j0}).univariate_polynomial()
+        if prime_steps[prime_index-1] == p:
+            j_prev = path[0][-1]
+            poly //= (x-j_prev).univariate_polynomial()
+
+        for j1 in poly.roots(multiplicities=False):
+            new_prime_index = prime_index + 1
+            new_path = (path, j1)
+            if new_prime_index < len(prime_steps):
+                stack.append((new_path, new_prime_index))
+            if filter_all or new_prime_index == len(prime_steps):
+                if condition(j1, degree_steps[prime_index]):
+                    # unwrap the path
+                    ret_path = []
+                    tmp_path = new_path
+                    while tmp_path is not None:
+                        tmp_path, j_step = tmp_path
+                        ret_path.append(j_step)
+
+                    yield list(zip(reversed(ret_path), prime_steps))
