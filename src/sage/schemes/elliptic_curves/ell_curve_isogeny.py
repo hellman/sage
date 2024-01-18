@@ -99,6 +99,7 @@ from sage.rings.fraction_field import FractionField
 
 from sage.schemes.elliptic_curves.constructor import EllipticCurve
 from sage.schemes.elliptic_curves.ell_generic import is_EllipticCurve
+from sage.schemes.elliptic_curves.mod_poly import classical_modular_polynomial
 
 from sage.schemes.elliptic_curves.weierstrass_morphism \
         import WeierstrassIsomorphism, _isomorphisms, baseWI, negation_morphism
@@ -4005,3 +4006,75 @@ def _int_as_balanced_product(n, bound=None, algorithm=None):
                     b *= p
         assert a * b == n
         return min(a, b), max(a, b)
+
+
+def _compute_isogenous_j_invariants_tree(j, degree):
+    """
+    Compute all j-invariants reachable by a separable isogeny of the given degree, in the form of a tree.
+
+    INPUT:
+
+    - ``j``: root j-invariant
+
+    - ``degree``: positive integer - the degree of the isogeny
+
+    OUTPUT:
+
+    A dictionary mapping pairs (j1, d1) to pairs (j2, d2) such that:
+
+    - j is d1-isogenous to j1
+
+    - j is d2-isogenous to j2
+
+    - j1 is (d1/d2)-isogenous to j2
+
+    EXAMPLES::
+
+        sage: from sage.schemes.elliptic_curves.ell_curve_isogeny import _compute_isogenous_j_invariants_tree
+    """
+    # Store j-invariant with an isogeny degree, because
+    # the main use-case of this tree is to compute an isogeny of a given degree,
+    # and short loops in the isogeny graph may potentially reduce the degree.
+
+    # ``tree`` is the data structure of the output;
+    # it is filled iteratively by prime-degree steps,
+    # in the increasing order of prime factors of ``degree``
+    # (although this might change in the future)
+    tree = {(j, 1): None}
+
+    # ``front`` maintains the current "front" of the tree,
+    # i.e., those (j-invariant, degree) pairs that have not been extended yet
+    front = {(j, 1)}
+
+    # main loop: iterating over prime-power factors of the degree
+    for p, e in factor(degree):
+        # we use classic modular polynomials to find neighbours in the p-isogeny graph
+        # to have the most general implementation
+
+        # we store the polynomial reduced modulo p (once)
+        # (not optimal since have to deal with p^2/2 coefficients)
+        # but PARI's evaluation of mod. poly. does not work over GF(p^2) now
+        mod_poly = classical_modular_polynomial(p).change_ring(j.parent())
+        x, y = mod_poly.parent().gens()
+        for step in range(e):
+            new_front = set()
+            for j0, deg0 in front:
+                # plug-in the second variable
+                poly = mod_poly.subs({y: j0}).univariate_polynomial()
+
+                # remove the backtracking root, if we have done a p-isogeny previously
+                if step >= 1 and deg0 != 1:
+                    jp, _ = tree[(j0,deg0)]
+                    poly //= (x-jp).univariate_polynomial()
+
+                # enumerate the p-isogenous neighbours
+                for j1 in poly.roots(multiplicities=False):
+                    assert mod_poly(j0, j1) == 0
+                    deg1 = deg0 * p
+                    # update the new front
+                    new_front.add((j1, deg1))
+                    # update the tree
+                    # (can overwrite a pair, but it is ok to keep the latest)
+                    tree[(j1,deg1)] = (j0,deg0)
+            front = new_front
+    return tree
